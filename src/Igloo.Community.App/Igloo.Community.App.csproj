@@ -81,11 +81,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Igloo.Core\Igloo.Core.csproj" />
-    <ProjectReference Include="..\Igloo.Preflight\Igloo.Preflight.csproj" />
-    <ProjectReference Include="..\Igloo.Iso\Igloo.Iso.csproj" />
-    <ProjectReference Include="..\Igloo.Migration\Igloo.Migration.csproj" />
-    <ProjectReference Include="..\Igloo.UsbWriter\Igloo.UsbWriter.csproj" />
+    <ProjectReference Include="..\Igloo.Command.Contracts\Igloo.Command.Contracts.csproj" />
+    <ProjectReference Include="..\Igloo.Core.Host\Igloo.Core.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -10,7 +10,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <ProjectReference Include="..\Igloo.Fleet.Domain\Igloo.Fleet.Domain.csproj" />
     <ProjectReference Include="..\Igloo.Fleet.Contracts\Igloo.Fleet.Contracts.csproj" />
-    <ProjectReference Include="..\Igloo.Core\Igloo.Core.csproj" />
-    <ProjectReference Include="..\Igloo.Preflight\Igloo.Preflight.csproj" />
+    <ProjectReference Include="..\Igloo.Command.Contracts\Igloo.Command.Contracts.csproj" />
+    <ProjectReference Include="..\Igloo.Core.Host\Igloo.Core.Host.csproj" />
   </ItemGroup>
 </Project>

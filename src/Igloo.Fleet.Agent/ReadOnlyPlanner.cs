@@ -1,12 +1,11 @@
-using System.Security.Cryptography;
 using Igloo.Core.Abstractions;
-using Igloo.Core.Plugins;
+using Igloo.Core.Host;
 using Igloo.Fleet.Contracts;
 
 namespace Igloo.Fleet.Agent;
 
 /// <summary>Only preflight and plugin compatibility are reachable. No installer/render/write interface is invoked.</summary>
-public sealed class ReadOnlyPlanner(IPreflightChecker checker, DistroRegistry registry)
+public sealed class ReadOnlyPlanner(IEndpointInspection inspection, IProviderCompatibility providers)
 {
     public async Task<ReadOnlyWorkResult> RunAsync(ReadOnlyWorkItem work, CancellationToken ct = default)
     {
@@ -29,31 +28,26 @@ public sealed class ReadOnlyPlanner(IPreflightChecker checker, DistroRegistry re
     private async Task<ReadOnlyWorkResult> ObserveAsync(ReadOnlyWorkItem work, CancellationToken ct)
     {
         var started = DateTimeOffset.UtcNow;
-        var report = await checker.RunAsync(ct).ConfigureAwait(false);
+        var report = await inspection.InspectAsync(ct).ConfigureAwait(false);
         var assessment = ReadOnlyAssessment.Map(report, work.Identity, started) with { AssessmentId = work.WorkItemId };
         DryRunFacts? facts = null;
         if (work.Type == ReadOnlyWorkType.RunMigrationDryRun)
         {
             var spec = work.Profile!.Spec;
             var reasons = new HashSet<PlanningReason>();
-            var supported = registry.TryGet(spec.DistroId, out var plugin) && Igloo.Fleet.Domain.PlanningService.SupportedDistro(spec.DistroId);
+            var supported = providers.IsLoaded(spec.DistroId) && Igloo.Fleet.Domain.PlanningService.SupportedDistro(spec.DistroId);
             var required = spec.MinimumAvailableBytes;
             string? pluginHash = null;
             if (supported)
             {
-                required = Math.Max(required, plugin!.Metadata.MinimumRequirements.MinDiskBytes);
+                var provider = await providers.InspectAsync(spec.DistroId, ct).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("Distro provider became unavailable.");
+                required = Math.Max(required, provider.MinimumDiskBytes);
                 // Only this read-only plugin method is called. No rendering or payload staging.
-                var findings = plugin.CheckCompatibility(report);
+                var findings = providers.Evaluate(spec.DistroId, report);
                 if (findings.Any(f => f.Severity == FindingSeverity.Blocker)) reasons.Add(PlanningReason.HardwareUnsupported);
                 if (findings.Any(f => f.Severity == FindingSeverity.Warning)) reasons.Add(PlanningReason.CompatibilityReview);
-                // Hash both implementation and local catalog input because plugin metadata influences compatibility.
-                var assemblyPath = plugin.GetType().Assembly.Location;
-                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                hasher.AppendData(await File.ReadAllBytesAsync(assemblyPath, ct).ConfigureAwait(false));
-                var catalog = Path.Join(Path.GetDirectoryName(assemblyPath), "distro.json");
-                if (File.Exists(catalog))
-                    hasher.AppendData(await File.ReadAllBytesAsync(catalog, ct).ConfigureAwait(false));
-                pluginHash = Convert.ToHexString(hasher.GetHashAndReset());
+                pluginHash = provider.ImplementationHash;
             }
             else reasons.Add(PlanningReason.UnsupportedDistro);
             // A deterministic candidate: the single disk with Windows' boot partition.

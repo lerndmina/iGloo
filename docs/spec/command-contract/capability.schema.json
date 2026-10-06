@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:igloo:command:v1:capability",
+  "type": "object",
+  "required": ["id", "version", "inputSchemaVersion", "resultSchemaVersion", "kind", "risk", "supportsDryRun", "authority", "supportedProviders", "requiresObservedState", "inputSchemaId", "resultSchemaId"],
+  "properties": {
+    "id": {"type": "string"}, "version": {"type": "integer", "minimum": 1},
+    "inputSchemaVersion": {"type": "integer", "minimum": 1},
+    "resultSchemaVersion": {"type": "integer", "minimum": 1},
+    "inputSchemaId": {"type": "string"}, "resultSchemaId": {"type": "string"},
+    "kind": {"enum": ["Query", "Plan", "Mutation"]},
+    "risk": {"enum": ["None", "Low", "Elevated", "Destructive"]},
+    "supportsDryRun": {"type": "boolean"},
+    "authority": {"enum": ["User", "Administrator", "ExplicitApproval"]},
+    "supportedProviders": {"type": "array", "items": {"type": "string"}},
+    "requiresObservedState": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

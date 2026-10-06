@@ -5,14 +5,14 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Igloo.Core.Abstractions;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class UsbWriterViewModel : ObservableObject
 {
-    private readonly IUsbWriterService _writer;
-    private readonly IPartitionResizeService _resizer;
+    private readonly IUsbPreparation _preparation;
     private readonly ILogger<UsbWriterViewModel> _logger;
 
     private string? _isoPath;
@@ -83,12 +83,10 @@ public sealed partial class UsbWriterViewModel : ObservableObject
     //   Constructor                              ─
 
     public UsbWriterViewModel(
-        IUsbWriterService writer,
-        IPartitionResizeService resizer,
+        IUsbPreparation preparation,
         ILogger<UsbWriterViewModel> logger)
     {
-        _writer = writer;
-        _resizer = resizer;
+        _preparation = preparation;
         _logger = logger;
     }
 
@@ -131,7 +129,7 @@ public sealed partial class UsbWriterViewModel : ObservableObject
         IsEnumerating = true;
         try
         {
-            var found = await _writer.EnumerateDrivesAsync(ct);
+            var found = await _preparation.EnumerateDrivesAsync(ct);
             Drives.Clear();
             foreach (var d in found)
                 Drives.Add(d);
@@ -198,28 +196,19 @@ public sealed partial class UsbWriterViewModel : ObservableObject
                 CurrentPhase = UsbWritePhase.ShrinkingPartition;
                 PhaseDisplay = "Shrinking Windows partition…";
 
-                const string prefix = "\\\\.\\PHYSICALDRIVE";
-                int diskNumber = int.Parse(
-                    _targetDisk.DeviceId.AsSpan()[prefix.Length..], CultureInfo.InvariantCulture);
-
-                long linuxBytes = (long)_linuxSizeGb * 1024 * 1024 * 1024;
-
                 var shrinkProgress = new Progress<string>(msg =>
                 {
                     PhaseDisplay = msg;
                     _logger.LogInformation("[resize] {Message}", msg);
                 });
 
-                _logger.LogInformation(
-                    "Dual-boot mode: shrinking disk {Disk} by {GiB} GiB for Linux",
-                    diskNumber, _linuxSizeGb);
-
-                await _resizer.ShrinkAsync(diskNumber, linuxBytes, shrinkProgress, ct);
+                await _preparation.WriteAsync(new UsbPreparationInput(SelectedDrive, _isoPath,
+                    _stagingDirectory, _targetDisk, _installMode, _linuxSizeGb), progress,
+                    shrinkProgress, ct);
             }
-
-            //   Step 1-4: Write USB                      ─
-            await _writer.WriteAsync(
-                SelectedDrive, _isoPath, _stagingDirectory, progress, ct);
+            else
+                await _preparation.WriteAsync(new UsbPreparationInput(SelectedDrive, _isoPath,
+                    _stagingDirectory, _targetDisk, _installMode, _linuxSizeGb), progress, null, ct);
 
             IsComplete = true;
         }

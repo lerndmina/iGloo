@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Igloo.Core.Abstractions;
+using Igloo.Core.Host;
 using Igloo.Fleet.Agent;
 using Igloo.Fleet.Contracts;
 using Xunit;
@@ -19,7 +20,7 @@ public sealed class AgentTests
         Findings = [new(FindingSeverity.Warning, "PRIVATE_CODE", "PRIVATE_PASSWORD", "PRIVATE_PATH")],
     };
 
-    internal sealed class Checker : IPreflightChecker
+    internal sealed class Checker : IPreflightChecker, IEndpointInspection
     {
         public int Calls { get; private set; }
         public Task<PreflightReport> RunAsync(CancellationToken ct = default)
@@ -28,6 +29,7 @@ public sealed class AgentTests
             Calls++;
             return Task.FromResult(Report);
         }
+        public Task<PreflightReport> InspectAsync(CancellationToken ct = default) => RunAsync(ct);
     }
 
     [Fact]
@@ -125,9 +127,10 @@ public sealed class AgentTests
             new ReadOnlyAssessment(new Checker()).RunAsync(new(Guid.NewGuid(), Guid.NewGuid()), cancellation.Token));
     }
 
-    private sealed class ThrowingChecker : IPreflightChecker
+    private sealed class ThrowingChecker : IPreflightChecker, IEndpointInspection
     {
         public Task<PreflightReport> RunAsync(CancellationToken ct = default) =>
             throw new IOException("PRIVATE_PATH and PRIVATE_PASSWORD");
+        public Task<PreflightReport> InspectAsync(CancellationToken ct = default) => RunAsync(ct);
     }
 }

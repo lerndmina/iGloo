@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Igloo.Command.Contracts\Igloo.Command.Contracts.csproj" />
+    <ProjectReference Include="..\Igloo.Core.Runtime\Igloo.Core.Runtime.csproj" />
+    <ProjectReference Include="..\Igloo.Core.Runtime.Execution\Igloo.Core.Runtime.Execution.csproj" />
+    <ProjectReference Include="..\Igloo.Core\Igloo.Core.csproj" />
+    <ProjectReference Include="..\Igloo.Preflight\Igloo.Preflight.csproj" />
+    <ProjectReference Include="..\Igloo.Iso\Igloo.Iso.csproj" />
+    <ProjectReference Include="..\Igloo.Migration\Igloo.Migration.csproj" />
+    <ProjectReference Include="..\Igloo.UsbWriter\Igloo.UsbWriter.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Igloo.Core.Models;
-using Igloo.Core.Plugins;
+using Igloo.Core.Host;
 
 namespace Igloo.Community.App.ViewModels;
 
@@ -9,9 +9,9 @@ public sealed record QuizOption(string Id, string Label);
 
 public sealed partial class WelcomeViewModel : ObservableObject
 {
-    private readonly DistroLoader _loader;
+    private readonly IProviderCatalog _loader;
 
-    public WelcomeViewModel(DistroLoader loader) => _loader = loader;
+    public WelcomeViewModel(IProviderCatalog loader) => _loader = loader;
 
     public IReadOnlyList<QuizOption> UseOptions { get; } =
     [

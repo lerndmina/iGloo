@@ -2,13 +2,14 @@ using System.Globalization;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Igloo.Core.Models;
-using Igloo.Preflight;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class MigrationSetupViewModel : ObservableObject
 {
+    private readonly IUserProfileInspection _profile;
     //   Auto-detected / read-only context                   
 
     
@@ -86,8 +87,9 @@ public sealed partial class MigrationSetupViewModel : ObservableObject
 
     //   Constructor                              
 
-    public MigrationSetupViewModel()
+    public MigrationSetupViewModel(IUserProfileInspection profile)
     {
+        _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         // Seed Linux username from Windows account name.
         _linuxUsername = LinuxUsernameRules.Sanitize(WindowsUsername);
 
@@ -106,12 +108,11 @@ public sealed partial class MigrationSetupViewModel : ObservableObject
         DetectedBrowsers = DetectBrowsers();
 
         // Detect Windows apps that have Linux equivalents.
-        DetectedSuggestions = WindowsAppScanner.Scan()
+        DetectedSuggestions = profile.GetSuggestedPackages()
             .Select(s => new SuggestedPackageEntry(s))
             .ToList();
 
-        AccountPicturePath = AccountPictureReader.TryFindAccountPicture(
-            NullLogger<MigrationSetupViewModel>.Instance);
+        AccountPicturePath = profile.FindAccountPicture();
     }
 
     /// <summary>
@@ -276,7 +277,7 @@ public sealed partial class MigrationSetupViewModel : ObservableObject
         // machine that cannot open it. Migrating a browser implies installing it.
         foreach (var browser in DetectedBrowsers.Where(b => b.IsSelected))
         {
-            var flatpakId = WindowsAppScanner.FlatpakFor(browser.Name);
+            var flatpakId = _profile.FlatpakForBrowser(browser.Name);
             if (flatpakId is null
                 || packages.Any(p => string.Equals(p.FlatpakId, flatpakId, StringComparison.Ordinal)))
                 continue;
@@ -343,7 +344,7 @@ public sealed partial class SuggestedPackageEntry : ObservableObject
 
     [ObservableProperty] private bool _isSelected = true;
 
-    public SuggestedPackageEntry(DetectedSuggestion suggestion)
+    public SuggestedPackageEntry(AppSuggestion suggestion)
     {
         ArgumentNullException.ThrowIfNull(suggestion);
 

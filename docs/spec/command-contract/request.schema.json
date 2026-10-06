@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:igloo:command:v1:request",
+  "type": "object",
+  "required": ["protocolVersion", "capabilityId", "capabilityVersion", "requestId", "correlationId", "input"],
+  "properties": {
+    "protocolVersion": {"const": 1},
+    "capabilityId": {"type": "string", "minLength": 1},
+    "capabilityVersion": {"type": "integer", "minimum": 1},
+    "requestId": {"type": "string", "format": "uuid"},
+    "correlationId": {"type": "string", "format": "uuid"},
+    "operationId": {"type": "string", "format": "uuid"},
+    "input": {"type": "object"},
+    "dryRun": {"type": "boolean"},
+    "idempotencyKey": {"type": "string"},
+    "observedStateFingerprint": {"type": "string"}
+  },
+  "additionalProperties": false
+}

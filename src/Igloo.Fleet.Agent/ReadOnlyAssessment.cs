@@ -1,22 +1,23 @@
 using System.Collections.Immutable;
 using System.Security;
 using Igloo.Core.Abstractions;
+using Igloo.Core.Host;
 using Igloo.Fleet.Contracts;
 using Igloo.Fleet.Domain;
 
 namespace Igloo.Fleet.Agent;
 
-public sealed class ReadOnlyAssessment(IPreflightChecker checker)
+public sealed class ReadOnlyAssessment(IEndpointInspection inspection)
 {
     public const string AgentVersion = "0.1.0";
-    public static string IglooVersion => typeof(IPreflightChecker).Assembly.GetName().Version!.ToString();
+    public static string IglooVersion => typeof(PreflightReport).Assembly.GetName().Version!.ToString();
 
     public async Task<AssessmentResult> RunAsync(DeviceIdentity identity, CancellationToken ct = default)
     {
         var started = DateTimeOffset.UtcNow;
         try
         {
-            var report = await checker.RunAsync(ct).ConfigureAwait(false);
+            var report = await inspection.InspectAsync(ct).ConfigureAwait(false);
             return Map(report, identity, started);
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or SecurityException)

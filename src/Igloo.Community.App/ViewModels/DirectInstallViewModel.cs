@@ -9,14 +9,15 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Igloo.Core.Abstractions;
 using Igloo.Core.Plugins;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class DirectInstallViewModel : ObservableObject
 {
-    private readonly IDirectInstallService _installer;
-    private readonly DistroRegistry _registry;
+    private readonly IInstallationPreparation _installer;
+    private readonly IWindowsMaintenance _maintenance;
     private readonly ILogger<DirectInstallViewModel> _logger;
 
     private int _diskNumber;
@@ -139,12 +140,12 @@ public sealed partial class DirectInstallViewModel : ObservableObject
     //   Constructor                              ─
 
     public DirectInstallViewModel(
-        IDirectInstallService installer,
-        DistroRegistry registry,
+        IInstallationPreparation installer,
+        IWindowsMaintenance maintenance,
         ILogger<DirectInstallViewModel> logger)
     {
         _installer = installer;
-        _registry = registry;
+        _maintenance = maintenance;
         _logger = logger;
     }
 
@@ -231,16 +232,11 @@ public sealed partial class DirectInstallViewModel : ObservableObject
 
         try
         {
-            if (_distroId is null || !_registry.TryGet(_distroId, out var plugin))
-                throw new InvalidOperationException(
-                    $"No installer plugin is loaded for distro '{_distroId}'. " +
-                    "Ensure the distro's Igloo.Distro.*.dll is present in its distros/ folder.");
-            var bootSpec = plugin.GetInstallerBootSpec();
-
+            if (_distroId is null) throw new InvalidOperationException("No distro was selected.");
             await _installer.PrepareAsync(
-                _diskNumber, _linuxSizeBytes,
+                _distroId, _diskNumber, _linuxSizeBytes,
                 _isoPath, _stagingDirectory,
-                bootSpec, _stage2Url,
+                _stage2Url,
                 progress, ct);
 
             IsComplete = true;
@@ -281,14 +277,7 @@ public sealed partial class DirectInstallViewModel : ObservableObject
             _logger.LogInformation("UEFI BootNext registered - initiating reboot");
 
             // 10-second countdown reboot with a user-visible message.
-            Process.Start(new ProcessStartInfo(
-                "shutdown.exe",
-                "/r /t 10 /c \"iGloo is restarting to install Linux. " +
-                "Save any open work now.\"")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
+            _maintenance.RestartToInstaller();
 
             // Shut down the WPF app so the user isn't left with a dead window.
             await Task.Delay(2000);

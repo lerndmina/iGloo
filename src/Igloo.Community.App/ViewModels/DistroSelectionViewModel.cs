@@ -1,15 +1,15 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Igloo.Core.Abstractions;
 using Igloo.Core.Models;
-using Igloo.Core.Plugins;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class DistroSelectionViewModel : ObservableObject
 {
-    private readonly DistroLoader _loader;
-    private readonly DistroRegistry _registry;
+    private readonly IProviderCatalog _loader;
+    private readonly IProviderCompatibility _compatibility;
     private readonly ILogger<DistroSelectionViewModel> _logger;
 
     // Rebuild bookkeeping: RefreshCompatibility only rebuilds the list when one of
@@ -39,11 +39,11 @@ public sealed partial class DistroSelectionViewModel : ObservableObject
 
     //   Constructor                              
 
-    public DistroSelectionViewModel(DistroLoader loader, DistroRegistry registry,
+    public DistroSelectionViewModel(IProviderCatalog loader, IProviderCompatibility compatibility,
         ILogger<DistroSelectionViewModel> logger)
     {
         _loader = loader;
-        _registry = registry;
+        _compatibility = compatibility;
         _logger = logger;
         // Initial population with no preflight data (no constraints yet).
         RefreshCompatibility(null);
@@ -160,11 +160,11 @@ public sealed partial class DistroSelectionViewModel : ObservableObject
         // This call is the ONLY place plugin CheckCompatibility is enforced 
         // before it was wired up, a machine below Ubuntu's RAM floor sailed into
         // an install that could only fail after repartitioning had begun.
-        if (report is not null && _registry.TryGet(m.Id, out var plugin))
+        if (report is not null && _compatibility.IsLoaded(m.Id))
         {
             try
             {
-                var blocker = plugin.CheckCompatibility(report)
+                var blocker = _compatibility.Evaluate(m.Id, report)
                     .FirstOrDefault(f => f.Severity == FindingSeverity.Blocker);
                 if (blocker is not null)
                 {

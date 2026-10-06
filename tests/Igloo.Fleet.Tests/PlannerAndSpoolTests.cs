@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Igloo.Core.Abstractions;
+using Igloo.Core.Host;
 using Igloo.Core.Plugins;
+using Igloo.Core.Runtime;
 using Igloo.Fleet.Agent;
 using Igloo.Fleet.Contracts;
 using Igloo.Fleet.Server;
@@ -24,13 +26,13 @@ public sealed class PlannerAndSpoolTests
         var registry = new DistroRegistry(NullLogger<DistroRegistry>.Instance);
         await registry.LoadAsync(Path.Join(Phase1SafetyTests.RepositoryRoot(), "distros"));
         var checker = new AgentTests.Checker();
-        var result = await new ReadOnlyPlanner(checker, registry).RunAsync(work);
+        var result = await new ReadOnlyPlanner(checker, new ProviderAdapter(registry)).RunAsync(work);
         Assert.Equal(1, checker.Calls);
         Assert.True(result.Planning!.TargetSupported);
         Assert.Equal(64, result.Planning.PluginHash!.Length);
         Assert.DoesNotContain("PRIVATE", JsonSerializer.Serialize(result), StringComparison.Ordinal);
         var missing = new DistroRegistry(NullLogger<DistroRegistry>.Instance);
-        var unsupported = await new ReadOnlyPlanner(checker, missing).RunAsync(work);
+        var unsupported = await new ReadOnlyPlanner(checker, new ProviderAdapter(missing)).RunAsync(work);
         Assert.False(unsupported.Planning!.TargetSupported);
         Assert.Contains(PlanningReason.UnsupportedDistro, unsupported.Planning.Reasons);
     }
@@ -41,7 +43,8 @@ public sealed class PlannerAndSpoolTests
         using var fixture = new PlanningFixture();
         var identity = PlanningTests.Device(fixture);
         var (work, _) = PlanningTests.Work(fixture, identity);
-        var planner = new ReadOnlyPlanner(new FailingChecker(), new DistroRegistry(NullLogger<DistroRegistry>.Instance));
+        var planner = new ReadOnlyPlanner(new FailingChecker(),
+            new ProviderAdapter(new DistroRegistry(NullLogger<DistroRegistry>.Instance)));
         var result = await planner.RunAsync(work);
         Assert.DoesNotContain("PRIVATE", JsonSerializer.Serialize(result), StringComparison.Ordinal);
         var stored = fixture.Service.Submit(identity, result);
@@ -61,7 +64,8 @@ public sealed class PlannerAndSpoolTests
         using var handler = new RetryHandler(directory, result.WorkItemId);
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
         await new TrustedAgentWorkflow(client, new ReadOnlyPlanner(checker,
-            new DistroRegistry(NullLogger<DistroRegistry>.Instance)), new ResultSpool(directory)).RunOnceAsync(identity);
+            new ProviderAdapter(new DistroRegistry(NullLogger<DistroRegistry>.Instance))),
+            new ResultSpool(directory)).RunOnceAsync(identity);
         Assert.Equal(2, handler.Submissions);
         Assert.Equal(0, checker.Calls);
         Assert.Empty(new ResultSpool(directory).Pending());
@@ -80,9 +84,26 @@ public sealed class PlannerAndSpoolTests
         Assert.ThrowsAny<Exception>(() => issuer.Issue("invalid-csr", new(Guid.NewGuid(), Guid.NewGuid())));
     }
 
-    private sealed class FailingChecker : IPreflightChecker
+    private sealed class FailingChecker : IPreflightChecker, IEndpointInspection
     {
         public Task<PreflightReport> RunAsync(CancellationToken ct = default) => throw new IOException("PRIVATE_PATH");
+        public Task<PreflightReport> InspectAsync(CancellationToken ct = default) => RunAsync(ct);
+    }
+
+    private sealed class ProviderAdapter(DistroRegistry registry) : IProviderCompatibility
+    {
+        private readonly DistroCompatibilityEvaluator _compatibility = new(registry);
+        public bool IsLoaded(string distroId) => registry.TryGet(distroId, out _);
+        public IReadOnlyList<PreflightFinding> Evaluate(string distroId, PreflightReport report) =>
+            _compatibility.Evaluate(distroId, report);
+        public async Task<ProviderInspection?> InspectAsync(string distroId,
+            CancellationToken cancellationToken = default)
+        {
+            if (!registry.TryGet(distroId, out var plugin)) return null;
+            var bytes = await File.ReadAllBytesAsync(plugin.GetType().Assembly.Location, cancellationToken);
+            return new(plugin.Id, plugin.Metadata.MinimumRequirements.MinDiskBytes,
+                Convert.ToHexString(SHA256.HashData(bytes)));
+        }
     }
 
     private sealed class RetryHandler(string directory, Guid workId) : HttpMessageHandler

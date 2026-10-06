@@ -6,13 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Igloo.Community.App.ViewModels;
-using Igloo.Core.Abstractions;
-using Igloo.Core.Plugins;
-using Igloo.Core.Services;
-using Igloo.Iso;
-using Igloo.Migration;
-using Igloo.Preflight;
-using Igloo.UsbWriter;
+using Igloo.Core.Host;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -55,11 +49,7 @@ public partial class IglooApp : Application
 
         var distrosDir = FindDistrosDirectory();
 
-        // Load distro catalog (JSON manifests → DistroLoader.LoadedDistros).
-        _host.Services.GetRequiredService<DistroLoader>().Load(distrosDir);
-
-        // Load distro plugin DLLs (IDistroPlugin implementations → DistroRegistry).
-        await _host.Services.GetRequiredService<DistroRegistry>().LoadAsync(distrosDir);
+        await _host.Services.GetRequiredService<IBackendCatalog>().LoadAsync(distrosDir);
 
         _host.Services.GetRequiredService<MainWindow>().Show();
     }
@@ -93,29 +83,7 @@ public partial class IglooApp : Application
     [SupportedOSPlatform("windows")]
     private static void RegisterServices(IServiceCollection services)
     {
-        // HTTP client used for ISO downloads (large files - no timeout).
-        services.AddHttpClient("iso", client =>
-        {
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("iGloo/0.0.1-alpha");
-            client.Timeout = Timeout.InfiniteTimeSpan;
-        });
-
-        // Canonical shared Windows observations; legacy services retain their own policies.
-        services.AddSingleton<IWindowsStorageReader, WindowsStorageReader>();
-        services.AddSingleton<IWindowsBitLockerReader, WindowsBitLockerReader>();
-        services.AddSingleton<IWindowsBcdReader, WindowsBcdReader>();
-        services.AddSingleton<IWindowsFirmwareReader, WindowsFirmwareReader>();
-
-        // Core services
-        services.AddSingleton<IPreflightChecker, WindowsPreflightChecker>();
-        services.AddSingleton<ILinuxRemovalService, LinuxRemovalService>();
-        services.AddSingleton<IPartitionResizeService, PartitionResizeService>();
-        services.AddSingleton<IDirectInstallService, DirectInstallService>();
-        services.AddSingleton<IIsoAcquisitionService, IsoAcquisitionService>();
-        services.AddSingleton<IFileStagingService, FileStagingService>();
-        services.AddSingleton<IUsbWriterService, UsbWriterService>();
-        services.AddSingleton<DistroLoader>();
-        services.AddSingleton<DistroRegistry>();
+        services.AddLocalBackend();
 
         // ViewModels - singletons so wizard state is preserved when navigating back
         services.AddSingleton<WelcomeViewModel>();

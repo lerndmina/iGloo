@@ -1,4 +1,4 @@
-using Igloo.Preflight;
+using Igloo.Core.Host;
 
 namespace Igloo.Community.App.ViewModels;
 
@@ -51,11 +51,11 @@ public sealed class MigrationSetupDesignData
 
     public IReadOnlyList<SuggestedPackageEntry> DetectedSuggestions { get; } =
     [
-        new SuggestedPackageEntry(new DetectedSuggestion(
+        new SuggestedPackageEntry(new AppSuggestion(
             "Visual Studio Code", "Visual Studio Code", "com.visualstudio.code", "code")),
-        new SuggestedPackageEntry(new DetectedSuggestion(
+        new SuggestedPackageEntry(new AppSuggestion(
             "Spotify", "Spotify", "com.spotify.Client", null)),
-        new SuggestedPackageEntry(new DetectedSuggestion(
+        new SuggestedPackageEntry(new AppSuggestion(
             "VLC media player", "VLC", "org.videolan.VLC", "vlc")),
     ];
 }

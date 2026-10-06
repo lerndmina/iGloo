@@ -2,15 +2,15 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Igloo.Core.Abstractions;
 using Igloo.Core.Models;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class IsoAcquisitionViewModel : ObservableObject
 {
-    private readonly IIsoAcquisitionService _service;
+    private readonly IIsoWorkflow _acquisition;
     private readonly ILogger<IsoAcquisitionViewModel> _logger;
-    private IsoSpecification? _spec;
 
     //   Observable state                           
 
@@ -57,10 +57,10 @@ public sealed partial class IsoAcquisitionViewModel : ObservableObject
     //   Constructor                              
 
     public IsoAcquisitionViewModel(
-        IIsoAcquisitionService service,
+        IIsoWorkflow acquisition,
         ILogger<IsoAcquisitionViewModel> logger)
     {
-        _service = service;
+        _acquisition = acquisition;
         _logger = logger;
     }
 
@@ -71,37 +71,6 @@ public sealed partial class IsoAcquisitionViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(distro);
 
         Distro = distro;
-
-        // Load the bundled, trusted signing key (if the distro ships one). Preferred
-        // over fetching from a keyserver: the trust anchor ships with the app.
-        ReadOnlyMemory<byte>? keyData = null;
-        if (distro.Iso.GpgKeyFile is { Length: > 0 } keyFile &&
-            distro.SourceDirectory is { Length: > 0 } srcDir)
-        {
-            var keyPath = System.IO.Path.Join(srcDir, keyFile);
-            try
-            {
-                if (System.IO.File.Exists(keyPath))
-                    keyData = System.IO.File.ReadAllBytes(keyPath);
-                else
-                    _logger.LogWarning("Bundled signing key not found at {Path}", keyPath);
-            }
-            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
-            {
-                _logger.LogWarning(ex, "Could not read bundled signing key {Path}", keyPath);
-            }
-        }
-
-        _spec = new IsoSpecification(
-            distro.Id,
-            distro.Iso.DownloadUrl,
-            distro.Iso.Sha256,
-            distro.Iso.GpgSignatureUrl,
-            distro.Iso.GpgKeyUrl,
-            distro.Iso.GpgSignedDataUrl,
-            keyData,
-            distro.Iso.GpgKeyFingerprint,
-            distro.Iso.IsoFilePattern);
 
         IsComplete = false;
         HasError = false;
@@ -117,7 +86,7 @@ public sealed partial class IsoAcquisitionViewModel : ObservableObject
     [RelayCommand(IncludeCancelCommand = true)]
     private async Task AcquireAsync(CancellationToken ct)
     {
-        if (_spec is null)
+        if (Distro is null)
             return;
 
         IsRunning = true;
@@ -142,7 +111,7 @@ public sealed partial class IsoAcquisitionViewModel : ObservableObject
 
         try
         {
-            Result = await _service.AcquireAsync(_spec, progress, ct);
+            Result = await _acquisition.AcquireAsync(Distro, progress, ct);
             IsComplete = true;
         }
         catch (OperationCanceledException)

@@ -4,9 +4,13 @@
 
 The trusted mode uses HTTPS enrollment and mTLS Agent requests, a separate operator
 authentication seam, durable SQLite transactions and immutable evidence/profile
-inputs. The existing project-reference graph is unchanged. The Agent calls the
-shared Windows preflight checker and distro compatibility checks; it cannot invoke
-migration execution. Fleet.Web supplies a minimal engineering operator CLI.
+inputs. In the current Phase 2 graph, Agent calls the read-only `Igloo.Core.Host`
+inspection/provider interfaces and maps local results into separate, sanitized
+Fleet transport records. Fleet Server remains isolated from Host and endpoint
+execution. The Agent's typed work still cannot invoke migration execution.
+Fleet.Web supplies a minimal engineering operator CLI. The historical Phase 1
+sequence below retains its original names, but `Shared preflight and distro
+compatibility` now sits behind Host.
 
 ```mermaid
 sequenceDiagram
@@ -59,13 +63,13 @@ local development connections. Production remote enrollment is not implemented.
 sequenceDiagram
     participant A as Fleet Agent
     participant S as Fleet Server
-    participant P as Existing WindowsPreflightChecker
+    participant P as Core.Host read-only inspection
     participant D as Development repositories
     A->>S: Register protocol, UUIDs, versions, capabilities
     S->>D: Record registration
     S-->>A: Accepted protocol and identity
     A->>S: Heartbeat
-    A->>P: IPreflightChecker.RunAsync
+    A->>P: IEndpointInspection.InspectAsync
     P-->>A: Local PreflightReport
     Note over A: Explicit allowlist mapping; no raw report or manifest
     A->>S: AssessmentResult

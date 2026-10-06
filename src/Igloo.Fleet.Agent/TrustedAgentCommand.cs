@@ -3,10 +3,8 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
-using Igloo.Core.Plugins;
+using Igloo.Core.Host;
 using Igloo.Fleet.Contracts;
-using Igloo.Preflight;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Igloo.Fleet.Agent;
 
@@ -58,11 +56,13 @@ internal static class TrustedAgentCommand
         using (var handler = FleetTls.CreateHandler(root, certificate))
         using (var client = new HttpClient(handler) { BaseAddress = address, Timeout = TimeSpan.FromSeconds(30) })
         {
-            var registry = new DistroRegistry(NullLogger<DistroRegistry>.Instance);
             var distros = Environment.GetEnvironmentVariable("IGLOO_FLEET_DISTROS") ?? Path.Join(AppContext.BaseDirectory, "distros");
-            await registry.LoadAsync(Path.GetFullPath(distros), timeout.Token).ConfigureAwait(false);
-            var checker = new WindowsPreflightChecker(NullLogger<WindowsPreflightChecker>.Instance);
-            var workflow = new TrustedAgentWorkflow(client, new ReadOnlyPlanner(checker, registry), new ResultSpool(Path.Join(directory, "outbox")));
+            var backend = await IglooHost.CreateReadOnlyAsync(Path.GetFullPath(distros),
+                timeout.Token).ConfigureAwait(false);
+            await using var backendDisposal = backend.ConfigureAwait(false);
+            var workflow = new TrustedAgentWorkflow(client,
+                new ReadOnlyPlanner(backend.Inspection, backend.Providers),
+                new ResultSpool(Path.Join(directory, "outbox")));
             await workflow.RunOnceAsync(metadata.Identity, timeout.Token).ConfigureAwait(false);
             Console.WriteLine("Read-only Agent cycle complete; execution capability is absent.");
         }

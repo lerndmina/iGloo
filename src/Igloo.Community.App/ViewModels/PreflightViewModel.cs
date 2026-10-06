@@ -5,15 +5,16 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Igloo.Community.App.Views;
 using Igloo.Core.Abstractions;
+using Igloo.Core.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Igloo.Community.App.ViewModels;
 
 public sealed partial class PreflightViewModel : ObservableObject
 {
-    private readonly IPreflightChecker _checker;
+    private readonly IPreflightWorkflow _preflight;
     private readonly ILogger<PreflightViewModel> _logger;
-    private readonly ILinuxRemovalService _linuxRemoval;
+    private readonly IWindowsMaintenance _maintenance;
 
     //   Observable state                           
 
@@ -85,11 +86,11 @@ public sealed partial class PreflightViewModel : ObservableObject
 
     //   Constructor                             ─
 
-    public PreflightViewModel(IPreflightChecker checker, ILinuxRemovalService linuxRemoval,
+    public PreflightViewModel(IPreflightWorkflow preflight, IWindowsMaintenance maintenance,
         ILogger<PreflightViewModel> logger)
     {
-        _checker = checker;
-        _linuxRemoval = linuxRemoval;
+        _preflight = preflight;
+        _maintenance = maintenance;
         _logger = logger;
     }
 
@@ -174,7 +175,7 @@ public sealed partial class PreflightViewModel : ObservableObject
             IsRemovingLinux = true;
             LinuxActionStatus = "Removing…";
             var progress = new Progress<string>(s => LinuxActionStatus = s);
-            await _linuxRemoval.RemoveAsync(targets, leftovers, removingAllLinux, progress);
+            await _preflight.RemoveLinuxAsync(targets, leftovers, removingAllLinux, progress);
 
             LinuxActionStatus = "Removal complete - re-running system check…";
             if (!IsRunning)
@@ -192,15 +193,6 @@ public sealed partial class PreflightViewModel : ObservableObject
         }
     }
 
-    /// <summary>Extracts the disk number from a WMI device id ("\\.\PHYSICALDRIVE0" → 0).</summary>
-    private static bool TryGetDiskNumber(string deviceId, out uint number)
-    {
-        const string marker = "PHYSICALDRIVE";
-        var at = deviceId.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        number = 0;
-        return at >= 0 && uint.TryParse(deviceId[(at + marker.Length)..], out number);
-    }
-
     //   Commands                               ─
 
     [RelayCommand(IncludeCancelCommand = true)]
@@ -214,62 +206,8 @@ public sealed partial class PreflightViewModel : ObservableObject
             // Held in a local until everything is settled: assigning the observable
             // Report mid-run would render the results UNDERNEATH the still-visible
             // "Reading your hardware…" panel (HasReport and IsRunning both true).
-            var report = await _checker.RunAsync(ct);
-            _logger.LogInformation("Pre-flight complete - {Count} finding(s)", report.Findings.Count);
-
-            // A leftover OEMDRV from an earlier run has no purpose in preflight: the
-            // installer creates a fresh one at install time. And it is iGloo's own
-            // label-matched scratch partition, so clean it silently rather than show
-            // the user a technical prompt. Best-effort: a busy partition is left for
-            // the install phase's delete-and-recreate to handle.
-            if (report.SeedLeftovers.Count > 0)
-            {
-                _logger.LogInformation("Auto-removing {Count} leftover installer partition(s)",
-                    report.SeedLeftovers.Count);
-                try
-                {
-                    await _linuxRemoval.RemoveAsync([], report.SeedLeftovers, removingAllLinux: false, ct: ct);
-                    report = await _checker.RunAsync(ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(ex, "Auto-cleanup of leftover installer partitions failed (non-fatal)");
-                }
-            }
-
-            // Hand back any free space sitting directly behind Windows, whoever freed it.
-            //
-            // The block above only covers staging partitions still present on THIS side.
-            // The common case is the other one: the first-boot agent deletes the staging
-            // partition from Linux, where the NTFS volume in front of it cannot be
-            // resized, so the space is correctly left unallocated - and nothing ever
-            // claimed it back. The user was expected to finish up in Disk Management,
-            // which is the manual disk work Igloo exists to remove. Runs every check, so
-            // it also repairs disks left that way by earlier versions.
-            // Deliberately only the disk Windows boots from. That is where Igloo carves
-            // its staging partition, and it keeps the operation away from data disks:
-            // unallocated space on a secondary drive may be there on purpose, and
-            // silently growing someone's backup volume into it would be its own bug.
-            try
-            {
-                var windowsDisk = report.Disks.FirstOrDefault(d => d.Partitions.Any(p => p.IsBoot));
-                if (windowsDisk is not null && TryGetDiskNumber(windowsDisk.DeviceId, out var diskNumber))
-                {
-                    var bytes = await _linuxRemoval.ReclaimFreeSpaceAsync(diskNumber, ct: ct);
-                    if (bytes > 0)
-                    {
-                        _logger.LogInformation("Reclaimed {Gb:N1} GB of unallocated space on disk {Disk}",
-                            bytes / (1024.0 * 1024 * 1024), diskNumber);
-                        report = await _checker.RunAsync(ct);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Could not reclaim adjacent free space (non-fatal)");
-            }
-
-            Report = report;
+            Report = await _preflight.InspectAndCleanupAsync(ct);
+            _logger.LogInformation("Pre-flight complete - {Count} finding(s)", Report.Findings.Count);
         }
         catch (OperationCanceledException)
         {
@@ -294,22 +232,9 @@ public sealed partial class PreflightViewModel : ObservableObject
 
         try
         {
-            // manage-bde.exe only exists in the real System32 (not SysWOW64).
-            // When Igloo runs as a 32-bit process on 64-bit Windows, the WOW64 layer
-            // silently redirects System32 → SysWOW64, so SpecialFolder.System returns
-            // the wrong directory. The "Sysnative" virtual folder bypasses this for
-            // 32-bit callers; it doesn't exist for 64-bit callers (hence the fallback).
-            var manageBde = FindNativeExe("manage-bde.exe");
+            var exitCode = await _maintenance.StartBitLockerDecryptionAsync(systemDrive);
 
-            using var proc = Process.Start(new ProcessStartInfo(manageBde, $"-off {systemDrive}")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            })!;
-
-            await proc.WaitForExitAsync();
-
-            if (proc.ExitCode == 0)
+            if (exitCode == 0)
             {
                 BitLockerActionStatus = "Decryption started - re-running system check…";
                 await Task.Delay(1200);
@@ -320,7 +245,7 @@ public sealed partial class PreflightViewModel : ObservableObject
             else
             {
                 BitLockerActionStatus =
-                    $"manage-bde exited with code {proc.ExitCode}. " +
+                    $"manage-bde exited with code {exitCode}. " +
                     "Try running 'manage-bde -off C:' in an elevated command prompt.";
             }
         }
@@ -347,11 +272,7 @@ public sealed partial class PreflightViewModel : ObservableObject
 
         try
         {
-            Process.Start(new ProcessStartInfo(FindNativeExe("shutdown.exe"), "/r /fw /t 10")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
+            _maintenance.RestartToFirmware();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -364,17 +285,6 @@ public sealed partial class PreflightViewModel : ObservableObject
                 "(usually Del or F2).",
                 FluentMessageSeverity.Danger);
         }
-    }
-
-    //   Helpers                                
-
-    private static string FindNativeExe(string exeName)
-    {
-        var winRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
-        var sysnative = Path.Join(winRoot, "Sysnative", exeName);
-        return File.Exists(sysnative)
-            ? sysnative
-            : Path.Join(winRoot, "System32", exeName);
     }
 
     //   Partition-bar presentation model                   ─

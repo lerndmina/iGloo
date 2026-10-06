@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:igloo:command:v1:result",
+  "type": "object",
+  "required": ["protocolVersion", "capabilityId", "capabilityVersion", "requestId", "correlationId", "succeeded", "warnings", "evidence"],
+  "properties": {
+    "protocolVersion": {"const": 1},
+    "capabilityId": {"type": "string"},
+    "capabilityVersion": {"type": "integer"},
+    "requestId": {"type": "string", "format": "uuid"},
+    "correlationId": {"type": "string", "format": "uuid"},
+    "operationId": {"type": "string", "format": "uuid"},
+    "succeeded": {"type": "boolean"},
+    "data": {},
+    "error": {"type": "object", "required": ["code", "message"], "properties": {
+      "code": {"enum": ["InvalidRequest", "UnsupportedCapability", "UnsupportedVersion", "PreconditionFailed", "StateChanged", "ApprovalRequired", "PolicyDenied", "ResourceBusy", "NotSupported", "VerificationFailed", "RecoveryRequired", "Cancelled", "InternalFailure"]},
+      "message": {"type": "string"}, "detailCode": {"type": "string"}}, "additionalProperties": false},
+    "warnings": {"type": "array", "items": {"type": "object", "required": ["code", "message"]}},
+    "evidence": {"type": "array", "items": {"type": "object", "required": ["code", "value"]}},
+    "observedStateFingerprint": {"type": "string"}
+  },
+  "additionalProperties": false
+}
