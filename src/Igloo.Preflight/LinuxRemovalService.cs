@@ -128,15 +128,19 @@ public sealed class LinuxRemovalService : ILinuxRemovalService
             // partition is the disk's main data partition.
             ManagementObject? best = null;
             long bestSize = 0;
+            long bestOffset = 0;
             char bestLetter = '\0';
+            var offsets = new List<long>();
             foreach (var p in results.Cast<ManagementObject>())
             {
                 var dl = WmiValues.ToDriveLetter(p["DriveLetter"]);
+                var offset = Convert.ToInt64(p["Offset"], CultureInfo.InvariantCulture);
+                offsets.Add(offset);
                 var size = dl == '\0' ? 0 : Convert.ToInt64(p["Size"], CultureInfo.InvariantCulture);
                 if (size > bestSize)
                 {
                     best?.Dispose();
-                    (best, bestSize, bestLetter) = (p, size, dl);
+                    (best, bestSize, bestOffset, bestLetter) = (p, size, offset, dl);
                 }
                 else
                 {
@@ -148,6 +152,16 @@ public sealed class LinuxRemovalService : ILinuxRemovalService
 
             using (best)
             {
+                // Read the gap from the partition table before asking GetSupportedSize:
+                // that call analyses the whole volume and can block for minutes on a large
+                // C:, and this runs on every preflight while there is usually nothing to
+                // reclaim (the next partition starts right behind the main one).
+                var bestEnd = bestOffset + bestSize;
+                var following = offsets.Where(o => o > bestOffset).ToList();
+                var nextStart = following.Count > 0 ? following.Min() : QueryDiskSize(diskNumber);
+                if (nextStart - bestEnd < 64 * MiB)
+                    return reclaimed;   // no adjacent space to grow into
+
                 var supported = best.InvokeMethod("GetSupportedSize",
                     best.GetMethodParameters("GetSupportedSize"), null)!;
                 if (Convert.ToUInt32(supported["ReturnValue"], CultureInfo.InvariantCulture) != 0)
@@ -183,6 +197,17 @@ public sealed class LinuxRemovalService : ILinuxRemovalService
                 "Could not reclaim freed space on disk {Disk} (non-fatal)", diskNumber);
         }
         return reclaimed;
+    }
+
+    // Disk end as the upper bound for space behind the last partition; 0 (nothing to
+    // reclaim) when the size cannot be read.
+    private static long QueryDiskSize(uint diskNumber)
+    {
+        using var searcher = new ManagementObjectSearcher(StorageNs,
+            $"SELECT Size FROM MSFT_Disk WHERE Number = {diskNumber}");
+        using var results = searcher.Get();
+        var disk = results.Cast<ManagementBaseObject>().FirstOrDefault();
+        return disk is null ? 0 : Convert.ToInt64(disk["Size"], CultureInfo.InvariantCulture);
     }
 
     public Task<long> ReclaimFreeSpaceAsync(uint diskNumber,
