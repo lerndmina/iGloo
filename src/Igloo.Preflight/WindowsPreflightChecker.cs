@@ -17,8 +17,10 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
 
     public WindowsPreflightChecker(ILogger<WindowsPreflightChecker> logger) => _logger = logger;
 
+    // WMI calls are synchronous and cannot be interrupted, so cancellation abandons the
+    // worker instead of waiting for it: a hung provider must not trap the wizard.
     public Task<PreflightReport> RunAsync(CancellationToken ct = default) =>
-        Task.Run(() => Collect(ct), ct);
+        Task.Run(() => Collect(ct), ct).WaitAsync(ct);
 
     private PreflightReport Collect(CancellationToken ct)
     {
@@ -558,7 +560,13 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
                 $"SELECT PartitionNumber, Size, Offset, GptType, IsSystem, IsBoot, DriveLetter " +
                 $"FROM MSFT_Partition WHERE DiskNumber = {diskNumber}");
             using var results = searcher.Get();
-            foreach (ManagementBaseObject p in results)
+            var rows = results.Cast<ManagementBaseObject>().ToList();
+
+            // Only the Windows disk is ever shrunk (dual-boot), so only its partitions are
+            // probed: GetSupportedSize analyses the whole volume and is the slowest call here.
+            bool isSystemDisk = rows.Any(p => p["IsSystem"] is true || p["IsBoot"] is true);
+
+            foreach (var p in rows)
             {
                 var index = Convert.ToInt32(p["PartitionNumber"], CultureInfo.InvariantCulture);
                 var size = Convert.ToInt64(p["Size"], CultureInfo.InvariantCulture);
@@ -570,7 +578,9 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
                 char dl = WmiValues.ToDriveLetter(p["DriveLetter"]);
 
                 var (fs, label) = QueryVolumeInfo(dl);
-                var shrinkable = fs == "NTFS" ? QueryShrinkableBytes(diskNumber, (uint)index, p) : 0L;
+                var shrinkable = isSystemDisk && fs == "NTFS"
+                    ? QueryShrinkableBytes(diskNumber, (uint)index, p)
+                    : 0L;
                 partitions.Add(new PartitionInfo(index, fs, size, label, isSystem, isBoot, shrinkable,
                                                  offset, gptType));
             }
@@ -582,6 +592,8 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
         // Disk order, not enumeration order: WMI returns partitions in arbitrary sequence.
         return partitions.OrderBy(p => p.OffsetBytes >= 0 ? p.OffsetBytes : long.MaxValue).ToList();
     }
+
+    private static readonly TimeSpan ShrinkProbeTimeout = TimeSpan.FromSeconds(30);
 
     private long QueryShrinkableBytes(uint diskNumber, uint partitionNumber, ManagementBaseObject partObj)
     {
@@ -597,7 +609,20 @@ public sealed class WindowsPreflightChecker : IPreflightChecker
             if (mo is null)
                 return 0;
 
-            var outParams = mo.InvokeMethod("GetSupportedSize", null, null);
+            // GetSupportedSize can run for minutes or never return on a large or busy
+            // volume (observed: >5 min on a 3.7 TB NVMe C:). Past the limit the call is
+            // abandoned and the partition reported as not shrinkable, so preflight still
+            // completes and only dual-boot on this partition is lost.
+            var invoke = Task.Run(() => mo.InvokeMethod("GetSupportedSize", null, null));
+            if (!invoke.Wait(ShrinkProbeTimeout))
+            {
+                _logger.LogWarning(
+                    "GetSupportedSize timed out after {Seconds}s for disk {Disk} partition {Part}; treating as not shrinkable",
+                    ShrinkProbeTimeout.TotalSeconds, diskNumber, partitionNumber);
+                return 0;
+            }
+
+            var outParams = invoke.Result;
             if (outParams is null)
                 return 0;
 
